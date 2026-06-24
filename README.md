@@ -1,1 +1,1 @@
-### A ruuning 'AI' Project for 4th Year-end Project
+### A ruuning 'AI-model' Project for 4th Year-end Project
