@@ -11,7 +11,6 @@ from torch import nn
 
 from career_roadmap_model import CareerMatcherNN
 
-
 DATA_PATH = Path("synthetic_data.json")
 PREPROCESSORS_PATH = Path("career_matcher_preprocessors.pkl")
 MODEL_PATH = Path("enhanced_career_matcher_nn.pth")
