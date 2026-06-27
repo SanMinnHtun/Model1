@@ -13,12 +13,6 @@ from career_roadmap_model import CareerMatcherNN
 PREPROCESSORS_PATH = Path("career_matcher_preprocessors.pkl")
 MODEL_PATH = Path("enhanced_career_matcher_nn.pth")
 
-CATEGORICAL_COLUMNS = [
-    "programming_base",
-    "preferred_task",
-    "academic_strength",
-    "personality_style",
-]
 FEATURE_COLUMNS = [
     "programming_base",
     "study_duration",
@@ -26,16 +20,27 @@ FEATURE_COLUMNS = [
     "academic_strength",
     "personality_style",
 ]
-TARGET_COLUMN = "recommended_roadmap"
 
-
-test_profile = {
-    "programming_base": "Python",
-    "study_duration": 12,
-    "preferred_task": "Data_Analysis",
-    "academic_strength": "Math_and_Logic",
-    "personality_style": "Analytical",
-}
+AVAILABLE_PROGRAMMING_BASES = ["Python", "Java", "C++", "JavaScript", "Go"]
+AVAILABLE_PREFERRED_TASKS = [
+    "Data_Analysis",
+    "Web_Development",
+    "Mobile_Apps",
+    "Scripting",
+    "Cloud_Architecture",
+]
+AVAILABLE_ACADEMIC_STRENGTHS = [
+    "Math_and_Logic",
+    "Creativity_and_Design",
+    "Problem_Solving",
+    "Memorization",
+]
+AVAILABLE_PERSONALITY_STYLES = [
+    "Analytical",
+    "Practical",
+    "Theoretical",
+    "Creative",
+]
 
 
 def load_preprocessors(path: Path) -> tuple[dict[str, Any], Any, Any]:
@@ -85,7 +90,7 @@ def build_feature_tensor(profile: dict[str, Any], encoders: dict[str, Any], scal
             continue
 
         if column not in profile:
-            raise KeyError(f"Missing required feature '{column}' in test profile.")
+            raise KeyError(f"Missing required feature '{column}' in profile.")
 
         encoder = encoders.get(column)
         if encoder is None:
@@ -108,6 +113,38 @@ def load_model(input_dim: int, output_dim: int) -> CareerMatcherNN:
     return model
 
 
+def prompt_with_options(prompt_message: str, options: list[str]) -> str:
+    print(prompt_message)
+    print("Available options:")
+    for option in options:
+        print(f"  - {option}")
+
+    while True:
+        user_input = input("> ").strip()
+        if user_input.lower() == "exit":
+            raise KeyboardInterrupt
+        if user_input in options:
+            return user_input
+        print("Invalid entry. Please choose one of the available options or type 'exit' to quit.")
+
+
+def prompt_study_duration() -> int:
+    print("Enter study_duration in months (e.g. 6, 12). Type 'exit' to quit.")
+
+    while True:
+        value = input("> ").strip()
+        if value.lower() == "exit":
+            raise KeyboardInterrupt
+
+        try:
+            duration = int(value)
+            if duration < 0:
+                raise ValueError("Study duration must be a non-negative integer.")
+            return duration
+        except ValueError:
+            print("Invalid number. Please enter a valid integer for study duration.")
+
+
 def pretty_print_results(
     profile: dict[str, Any],
     roadmap_labels: list[str],
@@ -116,35 +153,80 @@ def pretty_print_results(
 ) -> None:
     best_label = roadmap_labels[best_index]
     best_score = float(probabilities[best_index] * 100.0)
+    divider = "=" * 60
 
-    print("\n=== Career Matcher Model Test Summary ===")
+    print(f"\n{divider}")
+    print("Career Matcher Inference Result")
+    print(f"{divider}\n")
     print("Input profile:")
     for key, value in profile.items():
         print(f"  - {key}: {value}")
 
-    print(f"\nFinal Recommended Career Roadmap: {best_label}")
+    print("\n\033[1mFinal Recommended Career Roadmap:\033[0m")
+    print(f"  >> {best_label}\n")
     print(f"Confidence Score: {best_score:.2f}%\n")
-    print("All career roadmap probabilities:")
 
+    print("Ranked career roadmap probabilities:")
     sorted_indices = torch.argsort(probabilities, descending=True)
     for rank, idx in enumerate(sorted_indices, start=1):
         label = roadmap_labels[int(idx)]
         score = float(probabilities[int(idx)] * 100.0)
         print(f"  {rank:02d}. {label}: {score:.2f}%")
+    print(divider)
+
+
+def run_interactive_session(model: CareerMatcherNN, encoders: dict[str, Any], target_le: Any, scaler: Any) -> None:
+    while True:
+        try:
+            print("\n--- New profile test (type 'exit' at any prompt to quit) ---")
+            programming_base = prompt_with_options(
+                "Select your primary programming language:",
+                AVAILABLE_PROGRAMMING_BASES,
+            )
+            preferred_task = prompt_with_options(
+                "Select your preferred task:",
+                AVAILABLE_PREFERRED_TASKS,
+            )
+            academic_strength = prompt_with_options(
+                "Select your academic strength:",
+                AVAILABLE_ACADEMIC_STRENGTHS,
+            )
+            personality_style = prompt_with_options(
+                "Select your personality style:",
+                AVAILABLE_PERSONALITY_STYLES,
+            )
+            study_duration = prompt_study_duration()
+
+            profile = {
+                "programming_base": programming_base,
+                "study_duration": study_duration,
+                "preferred_task": preferred_task,
+                "academic_strength": academic_strength,
+                "personality_style": personality_style,
+            }
+
+            x_test = build_feature_tensor(profile, encoders, scaler)
+            with torch.no_grad():
+                raw_logits = model(x_test)
+                probabilities = F.softmax(raw_logits.squeeze(0), dim=0)
+
+            roadmap_labels = [str(label) for label in target_le.classes_]
+            best_index = int(torch.argmax(probabilities).item())
+            pretty_print_results(profile, roadmap_labels, probabilities, best_index)
+
+        except KeyboardInterrupt:
+            print("\nExit requested. Goodbye.")
+            break
+        except Exception as exc:
+            print(f"Error during inference: {exc}")
+            print("Please try again or type 'exit' to quit.")
 
 
 def main() -> None:
     encoders, target_le, scaler = load_preprocessors(PREPROCESSORS_PATH)
-    x_test = build_feature_tensor(test_profile, encoders, scaler)
-    model = load_model(input_dim=x_test.shape[1], output_dim=len(target_le.classes_))
-
-    with torch.no_grad():
-        raw_logits = model(x_test)
-        probabilities = F.softmax(raw_logits.squeeze(0), dim=0)
-
-    roadmap_labels = [str(label) for label in target_le.classes_]
-    best_index = int(torch.argmax(probabilities).item())
-    pretty_print_results(test_profile, roadmap_labels, probabilities, best_index)
+    x_dummy = torch.zeros((1, len(FEATURE_COLUMNS)), dtype=torch.float32)
+    model = load_model(input_dim=x_dummy.shape[1], output_dim=len(target_le.classes_))
+    run_interactive_session(model, encoders, target_le, scaler)
 
 
 if __name__ == "__main__":
